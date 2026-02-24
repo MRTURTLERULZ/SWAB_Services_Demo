@@ -1,0 +1,217 @@
+// Direct Booking Rental - Prisma Schema
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  ADMIN
+  STAFF
+}
+
+enum BookingStatus {
+  HOLD
+  PENDING_PAYMENT
+  CONFIRMED
+  CANCELLED
+  REFUNDED
+  EXPIRED
+}
+
+enum BlockedDateSource {
+  MANUAL
+  ICAL
+}
+
+model User {
+  id             String   @id @default(cuid())
+  supabaseAuthId String   @unique
+  email          String
+  role           UserRole @default(STAFF)
+  createdAt      DateTime @default(now())
+}
+
+model Property {
+  id                    String   @id @default(cuid())
+  slug                  String   @unique
+  name                  String
+  city                  String
+  state                 String
+  description           String   @db.Text
+  highlights            Json     // array of strings
+  amenities             Json     // array of strings
+  sleepingArrangement   Json?    // optional: [{ room: string, beds: string }]
+  maxGuests             Int
+  bedrooms              Int
+  beds                  Int
+  baths                 Int
+  checkInTime           String?
+  checkOutTime          String?
+  minNights             Int      @default(1)
+  houseRules            String?  @db.Text
+  cancellationPolicy    String?  @db.Text
+  approxLat             Float?
+  approxLng             Float?
+  showApproxMap         Boolean  @default(true)
+  externalAirbnbUrl     String?
+  externalAirbnbRoomId  String?
+  externalRating        Float?
+  externalReviewCount   Int?
+  externalSourceLabel   String?
+  featured              Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  images       PropertyImage[]
+  ratePlans    RatePlan[]
+  seasonalRates SeasonalRate[]
+  bookings     Booking[]
+  blockedRanges BlockedDateRange[]
+  externalCalendars ExternalCalendar[]
+  reviews      Review[]
+  inquiries    Inquiry[]
+}
+
+model PropertyImage {
+  id         String   @id @default(cuid())
+  propertyId String
+  url        String
+  alt        String?
+  sortOrder  Int      @default(0)
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  @@index([propertyId])
+}
+
+model RatePlan {
+  id              String   @id @default(cuid())
+  propertyId      String
+  baseNightly     Decimal  @db.Decimal(10, 2)
+  weekendNightly Decimal?  @db.Decimal(10, 2)
+  cleaningFee     Decimal  @db.Decimal(10, 2)
+  taxRate         Decimal  @db.Decimal(5, 4) // e.g. 0.0625 for 6.25%
+  currency        String   @default("USD")
+  property        Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  @@unique([propertyId])
+  @@index([propertyId])
+}
+
+model SeasonalRate {
+  id          String   @id @default(cuid())
+  propertyId  String
+  startDate   DateTime @db.Date
+  endDate     DateTime @db.Date
+  nightlyRate Decimal  @db.Decimal(10, 2)
+  minNights   Int?
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  @@index([propertyId])
+  @@index([propertyId, startDate, endDate])
+}
+
+model Booking {
+  id                   String        @id @default(cuid())
+  propertyId           String
+  guestName            String
+  guestEmail           String
+  guestPhone           String?
+  startDate            DateTime      @db.Date
+  endDate              DateTime      @db.Date
+  guests               Int
+  status               BookingStatus @default(HOLD)
+  holdExpiresAt        DateTime?
+  subtotal             Decimal       @db.Decimal(10, 2)
+  cleaningFee          Decimal       @db.Decimal(10, 2)
+  taxes                Decimal       @db.Decimal(10, 2)
+  total                Decimal       @db.Decimal(10, 2)
+  stripeSessionId      String?
+  stripePaymentIntentId String?
+  createdAt            DateTime      @default(now())
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  reviews  Review[]
+
+  @@index([propertyId, startDate, endDate, status])
+  @@index([status])
+  @@index([holdExpiresAt])
+}
+
+model BlockedDateRange {
+  id                   String            @id @default(cuid())
+  propertyId           String
+  startDate            DateTime          @db.Date
+  endDate              DateTime          @db.Date
+  source               BlockedDateSource
+  externalCalendarId   String?
+  note                 String?
+  property             Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  @@index([propertyId, startDate, endDate])
+}
+
+model ExternalCalendar {
+  id          String   @id @default(cuid())
+  propertyId  String
+  name        String
+  icalUrl     String
+  lastSyncedAt DateTime?
+  active      Boolean  @default(true)
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  events      ExternalEvent[]
+  @@index([propertyId])
+}
+
+model ExternalEvent {
+  id                  String           @id @default(cuid())
+  externalCalendarId  String
+  uid                 String
+  startDate           DateTime         @db.Date
+  endDate             DateTime         @db.Date
+  summary             String?
+  calendar            ExternalCalendar @relation(fields: [externalCalendarId], references: [id], onDelete: Cascade)
+  @@unique([externalCalendarId, uid])
+  @@index([externalCalendarId])
+}
+
+model Review {
+  id          String   @id @default(cuid())
+  propertyId  String
+  bookingId   String?
+  rating      Int      // 1-5
+  title       String?
+  body        String?  @db.Text
+  reviewerName String
+  createdAt   DateTime @default(now())
+  verified    Boolean  @default(false)
+  featured    Boolean  @default(false)
+  hidden      Boolean  @default(false)
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  booking     Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  @@index([propertyId])
+  @@index([bookingId])
+}
+
+model Inquiry {
+  id         String    @id @default(cuid())
+  propertyId String?
+  name       String
+  email      String
+  message    String    @db.Text
+  createdAt  DateTime  @default(now())
+  property   Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  @@index([propertyId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorUserId String?
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
